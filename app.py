@@ -5,6 +5,7 @@ import os
 import requests
 from progress_tracker_service import process_progress_data
 from shelter_service import get_shelter_service
+from deadlines_service import process_deadlines_data
 
 # Configure logging
 if not os.path.exists('logs'):
@@ -107,6 +108,12 @@ def get_shelter():
             distance = float(request.args.get('distance', 10.0))
         except ValueError:
             distance = 50.0
+            
+        # Get optional limit parameter (default 0 means no limit)
+        try:
+            limit = int(request.args.get('limit', 0))
+        except ValueError:
+            limit = 0
         
         # If direct coordinates are provided, use them
         if direct_lat and direct_lon:
@@ -120,6 +127,11 @@ def get_shelter():
                 
                 # Query for nearby shelters using the provided coordinates
                 shelters = shelter_service.get_shelters_by_location(lat, lon, distance_km=distance)
+                
+                # Apply limit if specified
+                if limit > 0 and len(shelters) > limit:
+                    shelters = shelters[:limit]
+                    logger.info(f"Limiting results to {limit} closest shelters")
                 
                 # Return results with coordinates
                 return jsonify({
@@ -179,6 +191,11 @@ def get_shelter():
         # Query for nearby shelters using the geocoded coordinates
         shelters = shelter_service.get_shelters_by_location(lat, lon, distance_km=distance)
         
+        # Apply limit if specified
+        if limit > 0 and len(shelters) > limit:
+            shelters = shelters[:limit]
+            logger.info(f"Limiting results to {limit} closest shelters")
+        
         # Return results with original address and coordinates
         return jsonify({
             "success": True, 
@@ -205,7 +222,8 @@ def check_progress():
 @app.route('/api/deadlines', methods=['GET'])
 def get_deadlines():
     logger.info("Endpoint hit: /api/deadlines")
-    return jsonify({"message": "Upcoming Deadlines endpoint"})
+    deadlines_data = process_deadlines_data()
+    return jsonify(deadlines_data)
 
 # Missing Person/Pet Endpoints
 @app.route('/api/missing', methods=['GET', 'POST'])
