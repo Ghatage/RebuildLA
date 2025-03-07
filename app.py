@@ -6,6 +6,7 @@ import requests
 from progress_tracker_service import process_progress_data
 from shelter_service import get_shelter_service
 from deadlines_service import process_deadlines_data
+from missing_service import get_missing_service
 
 # Configure logging
 if not os.path.exists('logs'):
@@ -34,11 +35,6 @@ logger.addHandler(console_handler)
 app = Flask(__name__)
 
 # Stay Healthy Endpoints
-@app.route('/api/stayhealthy/aqi', methods=['GET'])
-def get_air_quality():
-    logger.info("Endpoint hit: /api/stayhealthy/aqi")
-    return jsonify({"message": "Air Quality Index endpoint"})
-
 def geocode_address(address: str):
     """
     Convert address to lat/lon coordinates using Mapbox Geocoding API
@@ -228,12 +224,82 @@ def get_deadlines():
 # Missing Person/Pet Endpoints
 @app.route('/api/missing', methods=['GET', 'POST'])
 def missing():
-    if request.method == 'POST':
-        logger.info("Endpoint hit: /api/missing (POST - Report Missing)")
-        return jsonify({"message": "Report Missing Person/Pet endpoint"})
-    else:
-        logger.info("Endpoint hit: /api/missing (GET - Query Missing)")
-        return jsonify({"message": "Query Missing Person/Pet endpoint"})
+    logger.info(f"Endpoint hit: /api/missing with method {request.method}")
+    
+    try:
+        # Initialize missing service
+        missing_service = get_missing_service()
+        
+        if request.method == 'POST':
+            # Extract content from JSON request
+            data = request.get_json()
+            
+            if not data or 'content' not in data:
+                return jsonify({
+                    "success": False,
+                    "error": "Missing 'content' field in request body"
+                }), 400
+            
+            content = data['content']
+            
+            if not content or not isinstance(content, str) or len(content.strip()) < 10:
+                return jsonify({
+                    "success": False,
+                    "error": "Content must be a string with at least 10 characters"
+                }), 400
+            
+            # Add entry to database
+            entry_id = missing_service.add_missing_entry(content)
+            
+            if not entry_id:
+                return jsonify({
+                    "success": False,
+                    "error": "Failed to add entry"
+                }), 500
+            
+            return jsonify({
+                "success": True,
+                "message": "Entry added successfully",
+                "id": entry_id
+            })
+        
+        else:  # GET request
+            # Extract query parameter
+            query = request.args.get('query')
+            
+            # Get limit parameter 
+            # Default to 1 for queries (top match only) but use 5 for listing all entries
+            default_limit = 1 if query else 5
+            try:
+                limit = min(int(request.args.get('limit', default_limit)), 100)  # Cap at 100
+            except ValueError:
+                limit = default_limit
+            
+            if not query:
+                # If no query is provided, return all entries
+                entries = missing_service.get_all_missing_entries(limit=limit)
+                return jsonify({
+                    "success": True,
+                    "query": None,
+                    "count": len(entries),
+                    "entries": entries
+                })
+            
+            # Search for similar entries
+            similar_entries = missing_service.search_missing_entries(query, limit=limit)
+            
+            return jsonify({
+                "success": True,
+                "query": query,
+                "count": len(similar_entries),
+                "entries": similar_entries
+            })
+    
+    except Exception as e:
+        error_msg = f"Error processing missing person/pet request: {str(e)}"
+        logger.error(error_msg)
+        logger.exception("Stack trace:")
+        return jsonify({"success": False, "error": error_msg}), 500
 
 @app.route('/api/debug/shelters', methods=['GET'])
 def debug_shelters():
